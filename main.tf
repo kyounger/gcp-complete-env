@@ -8,7 +8,7 @@ module "gcp-network" {
   project_id = var.project_id
   network_name = var.cluster_name
   auto_create_subnetworks = false
-  routing_mode = "REGIONAL"
+  routing_mode = "GLOBAL"
 
   subnets = [
     {
