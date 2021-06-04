@@ -1,91 +1,83 @@
 
 data "google_client_config" "default" {}
 
+locals {
+  regions = [for cluster in var.clusters : cluster.region]
+  primary_subnets = [for name, def in var.clusters : {
+    subnet_name = "${name}-subnet-primary"
+    subnet_ip = def.primary
+    subnet_region = def.region
+    subnet_private_access = true
+  }]
+  secondary_ranges = { for name, def in var.clusters : "${name}-subnet-primary" => [
+    {
+      range_name = "${name}-subnet-pods"
+      ip_cidr_range = def.pods
+    },
+    {
+      range_name = "${name}-subnet-services"
+      ip_cidr_range = def.services
+    },
+  ]}
+}
+
 module "gcp-network" {
   source = "terraform-google-modules/network/google"
   version = "3.2.2"
 
   project_id = var.project_id
-  network_name = var.cluster_name
+  network_name = var.proxy_subdomain
   auto_create_subnetworks = false
   routing_mode = "GLOBAL"
-
-  subnets = [
-    {
-      subnet_name = "subnet1"
-      subnet_ip = "10.0.0.0/16"
-      subnet_region = var.region
-      subnet_private_access = true
-    },
-  ]
-  secondary_ranges = {
-    "subnet1" = [
-      {
-        range_name = var.ip_range_pods_name
-        ip_cidr_range = "10.1.0.0/16"
-      },
-      {
-        range_name = var.ip_range_services_name
-        ip_cidr_range = "10.2.0.0/16"
-      },
-    ]
-  }
+  subnets = local.primary_subnets
+  secondary_ranges = local.secondary_ranges
 }
 
 module "cloud_router" {
+  for_each = toset(local.regions)
+
   source  = "terraform-google-modules/cloud-router/google"
   version = "~> 0.4"
   project = var.project_id
-  name    = "${var.cluster_name}-router"
+  name    = "${var.owner_label}${each.value}-router"
   network = module.gcp-network.network_name
-  region  = var.region
+  region  = each.value
 
   nats = [{
-    name = "${var.cluster_name}-gateway"
+    name = "${var.owner_label}${each.value}-gateway"
   }]
 }
 
 
-#------- kubernetes stuff ---------#
+module "gke-clusters" {
+  for_each = var.clusters
 
-provider "kubernetes" {
-  host = "https://${module.gke.endpoint}"
-  token = data.google_client_config.default.access_token
-  cluster_ca_certificate = base64decode(module.gke.ca_certificate)
+  source = "./clusters"
+
+  cluster_name = each.key
+  global_network_name = module.gcp-network.network_name
+  ip_range_pods_name = "${each.key}-subnet-pods"
+  ip_range_services_name = "${each.key}-subnet-services"
+  master_ipv4_cidr_block = each.value.k8s_api
+  node_pools = each.value.node_pools
+  owner_label = var.owner_label
+  project_id = var.project_id
+  region = each.value.region
+  subnetwork_name = "${each.key}-subnet-primary"
+  zones = each.value.zones
 }
 
-module "gke" {
-  source = "terraform-google-modules/kubernetes-engine/google//modules/private-cluster"
-  version = "14.3.0"
-
-  project_id = var.project_id
-  name = var.cluster_name
-  regional = true
-  zones = var.zones
-  region = var.region
-  enable_private_endpoint   = false
-  enable_private_nodes      = true
-  remove_default_node_pool  = true
-  master_ipv4_cidr_block    = "10.254.0.0/28"
-  create_service_account = true
-  default_max_pods_per_node = 110
-
-  ip_range_pods = var.ip_range_pods_name
-  ip_range_services = var.ip_range_services_name
-  network = module.gcp-network.network_name
-  subnetwork = module.gcp-network.subnets_names[0]
-
-  node_pools = var.node_pools
-
-  node_pools_oauth_scopes = {
-    all = [
-      "https://www.googleapis.com/auth/trace.append",
-      "https://www.googleapis.com/auth/service.management.readonly",
-      "https://www.googleapis.com/auth/monitoring",
-      "https://www.googleapis.com/auth/devstorage.read_only",
-      "https://www.googleapis.com/auth/servicecontrol",
-      "https://www.googleapis.com/auth/logging.write",
-    ]
+// ----------------------------------------------------------------------------
+// Static IP for proxy_subdomain
+// ----------------------------------------------------------------------------
+resource "google_compute_address" "static" {
+  provider = google-beta
+  project = var.project_id
+  name = "load-balancer-${var.proxy_subdomain}"
+  address_type = "EXTERNAL"
+  region = var.proxy_region
+  labels = {
+    "owner": var.owner_label
   }
 }
 
@@ -94,7 +86,7 @@ module "gke" {
 // ----------------------------------------------------------------------------
 resource "google_dns_record_set" "hostname" {
   project = var.project_id
-  name = "${var.subdomain}.${data.google_dns_managed_zone.managed_zone.dns_name}"
+  name = "${var.proxy_subdomain}.${data.google_dns_managed_zone.managed_zone.dns_name}"
   type = "A"
   ttl  = 300
   managed_zone = data.google_dns_managed_zone.managed_zone.name
@@ -106,16 +98,3 @@ data "google_dns_managed_zone" "managed_zone" {
   project = var.project_id
 }
 
-// ----------------------------------------------------------------------------
-// Static IP for ingress controller load balancer
-// ----------------------------------------------------------------------------
-resource "google_compute_address" "static" {
-  provider = google-beta
-  project = var.project_id
-  name = "load-balancer-${var.cluster_name}"
-  address_type = "EXTERNAL"
-  region = var.region
-  labels = {
-    "owner": var.owner_label
-  }
-}

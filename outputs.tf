@@ -8,3 +8,7 @@ output "fqdn" {
   description = "Fully qualified hostname with domain name"
   value       = trimsuffix(google_dns_record_set.hostname.name,".")
 }
+
+output "secondary_ranges" {
+  value = local.secondary_ranges
+}
