@@ -19,8 +19,7 @@ variable "proxy_region" {
 }
 
 variable "clusters" {
-  type = map(
-  object({
+  type = map(object({
     region = string
     zones = list(string)
     primary = string
@@ -28,8 +27,7 @@ variable "clusters" {
     services = string
     k8s_api = string
     node_pools = list(map(string))
-  })
-  )
+  }))
 }
 
 
