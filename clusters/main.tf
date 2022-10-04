@@ -5,11 +5,16 @@ data "google_client_config" "default" {}
 
 module "gke" {
   source = "terraform-google-modules/kubernetes-engine/google//modules/private-cluster"
-  version = "14.3.0"
+  version = "17.0.0"
 
+//  add_cluster_firewall_rules = true
+  add_master_webhook_firewall_rules = true
+  firewall_inbound_ports = ["8443", "9443", "15017", "443", "80", "5555"]
   project_id = var.project_id
   name = var.cluster_name
   regional = true
+  kubernetes_version = "1.20"
+  release_channel = "STABLE"
   zones = var.zones
   region = var.region
   enable_private_endpoint   = false
@@ -51,4 +56,3 @@ resource "google_compute_address" "static" {
     "owner": var.owner_label
   }
 }
-

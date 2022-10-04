@@ -14,10 +14,6 @@ variable "proxy_subdomain" {
   type = string
 }
 
-variable "proxy_region" {
-  type = string
-}
-
 variable "clusters" {
   type = map(object({
     region = string

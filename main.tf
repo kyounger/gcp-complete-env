@@ -23,7 +23,7 @@ locals {
 
 module "gcp-network" {
   source = "terraform-google-modules/network/google"
-  version = "3.2.2"
+  version = "3.4.0"
 
   project_id = var.project_id
   network_name = var.proxy_subdomain
@@ -31,13 +31,35 @@ module "gcp-network" {
   routing_mode = "GLOBAL"
   subnets = local.primary_subnets
   secondary_ranges = local.secondary_ranges
+  firewall_rules = [{
+    name                    = "allow-ingress"
+    description             = null
+    direction               = "INGRESS"
+    priority                = 1000
+    ranges                  = ["10.0.0.0/8"]
+    source_tags             = null
+    source_service_accounts = null
+    target_tags             = null
+    target_service_accounts = null
+    allow = [{
+      protocol = "tcp"
+      ports    = ["1-65535"]
+    },{
+      protocol = "udp"
+      ports    = ["1-65535"]
+    }]
+    deny = []
+    log_config = {
+      metadata = "INCLUDE_ALL_METADATA"
+    }
+  }]
 }
 
 module "cloud_router" {
   for_each = toset(local.regions)
 
   source  = "terraform-google-modules/cloud-router/google"
-  version = "~> 0.4"
+  version = "~> 1.2.0"
   project = var.project_id
   name    = "${var.owner_label}${each.value}-router"
   network = module.gcp-network.network_name
@@ -51,7 +73,6 @@ module "cloud_router" {
 
 module "gke-clusters" {
   for_each = var.clusters
-
   source = "./clusters"
 
   cluster_name = each.key
@@ -70,15 +91,15 @@ module "gke-clusters" {
 // ----------------------------------------------------------------------------
 // Static IP for proxy_subdomain
 // ----------------------------------------------------------------------------
-resource "google_compute_address" "static" {
-  provider = google-beta
-  project = var.project_id
-  name = "load-balancer-${var.proxy_subdomain}"
+module "address-fe" {
+  source  = "terraform-google-modules/address/google"
+  version = "3.0.0"
+
+  names  = [ "static-ip-${var.proxy_subdomain}" ]
+  global = true
+  project_id = var.project_id
+  region = null
   address_type = "EXTERNAL"
-  region = var.proxy_region
-  labels = {
-    "owner": var.owner_label
-  }
 }
 
 // ----------------------------------------------------------------------------
@@ -90,11 +111,16 @@ resource "google_dns_record_set" "hostname" {
   type = "A"
   ttl  = 300
   managed_zone = data.google_dns_managed_zone.managed_zone.name
-  rrdatas = [google_compute_address.static.address]
+  rrdatas = [module.address-fe.addresses[0]]
 }
 
 data "google_dns_managed_zone" "managed_zone" {
   name = var.managed_zone_name
   project = var.project_id
 }
+
+
+// 1. add forwarding rule (kyoungertest-fe-1) -- attach IP address
+// 2. add target proxy (kyoungertest-target-proxy) -- attach url map / host path and rules (kyoungertest)??
+// 3. add backend services
 
