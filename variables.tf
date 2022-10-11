@@ -6,6 +6,11 @@ variable "owner_label" {
   type = string
 }
 
+
+variable "dns_managed_zone_project_id" {
+  type = string
+}
+
 variable "managed_zone_name" {
   type = string
 }
@@ -16,12 +21,12 @@ variable "proxy_subdomain" {
 
 variable "clusters" {
   type = map(object({
-    region = string
-    zones = list(string)
-    primary = string
-    pods = string
-    services = string
-    k8s_api = string
+    region     = string
+    zones      = list(string)
+    primary    = string
+    pods       = string
+    services   = string
+    k8s_api    = string
     node_pools = list(map(string))
   }))
 }

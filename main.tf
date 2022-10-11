@@ -111,7 +111,7 @@ module "address-fe" {
 // DNS configuration
 // ----------------------------------------------------------------------------
 resource "google_dns_record_set" "hostname" {
-  project      = var.project_id
+  project      = var.dns_managed_zone_project_id
   name         = "${var.proxy_subdomain}.${data.google_dns_managed_zone.managed_zone.dns_name}"
   type         = "A"
   ttl          = 300
@@ -121,7 +121,7 @@ resource "google_dns_record_set" "hostname" {
 
 data "google_dns_managed_zone" "managed_zone" {
   name    = var.managed_zone_name
-  project = var.project_id
+  project = var.dns_managed_zone_project_id
 }
 
 
